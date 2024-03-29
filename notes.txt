@@ -1,0 +1,21 @@
+OK, we would like to store the development history from both Git and maillist
+patchsets, or merge/pull requests. Such as tracking the patchset revisions, or
+merge/pull request updates.
+
+We know how to identify revisions in Git: a sha1 or a sha256 hash.
+
+However, maillist patchsets and merge/pull requests would need some other sort
+of identification. Perhaps a sha256 hash over stripped patches, like CKI does?
+
+Perhaps we could operate on 32 bytes plus one extra byte for the hash
+type/space? So 33 bytes total per revision?
+
+Or, wait, actually the git commit hash includes the change itself as well as
+its base, so patchset hash should encode that too.
+
+We gotta figure it out somehow, but in the end we should be able to have a
+single array of bytes to distinguish any possible revision.
+
+Then we'll have to implement an efficient storage and memory representation,
+as well as lookup algorithms. Some of these can be gleaned from the Git
+implementation. But we can start with something simple, that's good enough.

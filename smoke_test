@@ -1,0 +1,19 @@
+#!/bin/bash
+
+set -euo pipefail
+
+export PGDATA=`mktemp -d -t dag-fdw-XXXXXXXXXXX`
+export PGHOST="$PGDATA"
+
+trap 'pg_ctl stop >/dev/null || true; rm -rf "$PGDATA"' EXIT
+
+pg_config --libdir
+pg_ctl initdb > /dev/null
+pg_ctl start -o "-h '' -c unix_socket_directories=${PGDATA@Q}"
+psql postgres <<<"
+    \\set ON_ERROR_STOP on
+    CREATE EXTENSION dag_fdw;
+    CREATE SERVER dag_server FOREIGN DATA WRAPPER dag_fdw;
+    CREATE FOREIGN TABLE sequential_ints ( val int ) SERVER dag_server;
+    SELECT * FROM sequential_ints;
+"
