@@ -10,14 +10,26 @@
 Datum dag_fdw_handler(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(dag_fdw_handler);
 
-void dag_fdw_GetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid);
-void dag_fdw_GetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid);
-ForeignScan *dag_fdw_GetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid,
-    ForeignPath *best_path, List *tlist, List *scan_clauses, Plan *outer_plan);
-void dag_fdw_BeginForeignScan(ForeignScanState *node, int eflags);
-TupleTableSlot *dag_fdw_IterateForeignScan(ForeignScanState *node);
-void dag_fdw_ReScanForeignScan(ForeignScanState *node);
-void dag_fdw_EndForeignScan(ForeignScanState *node);
+static void dag_fdw_GetForeignRelSize(PlannerInfo *root,
+                                      RelOptInfo *baserel,
+                                      Oid foreigntableid);
+
+static void dag_fdw_GetForeignPaths(PlannerInfo *root,
+                                    RelOptInfo *baserel,
+                                    Oid foreigntableid);
+
+static ForeignScan *dag_fdw_GetForeignPlan(PlannerInfo *root,
+                                           RelOptInfo *baserel,
+                                           Oid foreigntableid,
+                                           ForeignPath *best_path,
+                                           List *tlist,
+                                           List *scan_clauses,
+                                           Plan *outer_plan);
+
+static void dag_fdw_BeginForeignScan(ForeignScanState *node, int eflags);
+static TupleTableSlot *dag_fdw_IterateForeignScan(ForeignScanState *node);
+static void dag_fdw_ReScanForeignScan(ForeignScanState *node);
+static void dag_fdw_EndForeignScan(ForeignScanState *node);
 
 Datum
 dag_fdw_handler(PG_FUNCTION_ARGS)
@@ -33,7 +45,11 @@ dag_fdw_handler(PG_FUNCTION_ARGS)
     PG_RETURN_POINTER(fdwroutine);
 }
 
-void dag_fdw_GetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid) {
+static void
+dag_fdw_GetForeignRelSize(PlannerInfo *root,
+                          RelOptInfo *baserel,
+                          Oid foreigntableid)
+{
     Relation rel = table_open(foreigntableid, NoLock);
     Oid typid = rel->rd_att->attrs[0].atttypid;
     if (rel->rd_att->natts != 1) {
@@ -51,8 +67,14 @@ void dag_fdw_GetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid forei
     table_close(rel, NoLock);
 }
 
-void dag_fdw_GetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid) {
-    Path *path = (Path *)create_foreignscan_path(root, baserel,
+static void
+dag_fdw_GetForeignPaths(PlannerInfo *root,
+                        RelOptInfo *baserel,
+                        Oid foreigntableid)
+{
+    Path *path = (Path *)create_foreignscan_path(
+        root,
+        baserel,
         NULL,               /* default pathtarget */
         baserel->rows,      /* rows */
         1,                  /* startup cost */
@@ -60,33 +82,47 @@ void dag_fdw_GetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreign
         NIL,                /* no pathkeys */
         NULL,               /* no required outer relids */
         NULL,               /* no fdw_outerpath */
-        NIL);               /* no fdw_private */
+        NIL                 /* no fdw_private */
+    );
     add_path(baserel, path);
 }
 
-ForeignScan *dag_fdw_GetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid,
-    ForeignPath *best_path, List *tlist, List *scan_clauses, Plan *outer_plan) {
+static ForeignScan *
+dag_fdw_GetForeignPlan(PlannerInfo *root,
+                       RelOptInfo *baserel,
+                       Oid foreigntableid,
+                       ForeignPath *best_path,
+                       List *tlist,
+                       List *scan_clauses,
+                       Plan *outer_plan)
+{
     scan_clauses = extract_actual_clauses(scan_clauses, false);
-    return make_foreignscan(tlist,
+    return make_foreignscan(
+        tlist,
         scan_clauses,
         baserel->relid,
         NIL, /* no expressions we will evaluate */
         NIL, /* no private data */
         NIL, /* no custom tlist; our scan tuple looks like tlist */
         NIL, /* no quals we will recheck */
-        outer_plan);
+        outer_plan
+    );
 }
 
 typedef struct dag_fdw_state {
     int current;
 } dag_fdw_state;
 
-void dag_fdw_BeginForeignScan(ForeignScanState *node, int eflags) {
+static void
+dag_fdw_BeginForeignScan(ForeignScanState *node, int eflags)
+{
     dag_fdw_state *state = palloc0(sizeof(dag_fdw_state));
     node->fdw_state = state;
 }
 
-TupleTableSlot *dag_fdw_IterateForeignScan(ForeignScanState *node) {
+static TupleTableSlot *
+dag_fdw_IterateForeignScan(ForeignScanState *node)
+{
     TupleTableSlot *slot = node->ss.ss_ScanTupleSlot;
     dag_fdw_state *state = node->fdw_state;
 
@@ -102,12 +138,16 @@ TupleTableSlot *dag_fdw_IterateForeignScan(ForeignScanState *node) {
     return slot;
 }
 
-void dag_fdw_ReScanForeignScan(ForeignScanState *node) {
+static void
+dag_fdw_ReScanForeignScan(ForeignScanState *node)
+{
     dag_fdw_state *state = node->fdw_state;
     state->current = 0;
 }
 
-void dag_fdw_EndForeignScan(ForeignScanState *node) {
+static void
+dag_fdw_EndForeignScan(ForeignScanState *node)
+{
 }
 
 PG_MODULE_MAGIC;
