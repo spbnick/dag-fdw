@@ -13,7 +13,12 @@ pg_ctl start -o "-h '' -c unix_socket_directories=${PGDATA@Q}"
 psql postgres <<<"
     \\set ON_ERROR_STOP on
     CREATE EXTENSION dag_fdw;
-    CREATE SERVER dag_server FOREIGN DATA WRAPPER dag_fdw;
-    CREATE FOREIGN TABLE sequential_ints ( val int ) SERVER dag_server;
-    SELECT * FROM sequential_ints;
+    CREATE SERVER dag_server
+        FOREIGN DATA WRAPPER dag_fdw
+        OPTIONS (node_id_len '20');
+    CREATE FOREIGN TABLE edges
+        (node_id varchar(40), parent_node_id varchar(40))
+        SERVER dag_server
+        OPTIONS (relation 'edges');
+    SELECT * FROM edges;
 "

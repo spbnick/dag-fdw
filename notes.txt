@@ -19,3 +19,64 @@ single array of bytes to distinguish any possible revision.
 Then we'll have to implement an efficient storage and memory representation,
 as well as lookup algorithms. Some of these can be gleaned from the Git
 implementation. But we can start with something simple, that's good enough.
+
+---
+
+OK, what kind of queries we might want?
+
+From DAG talk's slides:
+* Which issues should we triage for this revision?
+    * We have to prioritize issues to triage.
+* What were last X test results for last Y commits?
+    * We gotta alert on changing result patterns.
+    * Performance trends along revision history.
+* Can we release this branch?
+    * Which issues were found since last release?
+* Which branch revisions have a particular issue?
+
+So, suppose I want to know which unique test issues were detected between a
+commit and a previous release. For that I would need to find all commits
+between those two commits. Let's say I have a table called "ranges":
+
+tip     base    nodes
+---     ----    -----
+node    node    ARRAY[node...]
+
+Then I can say something like this:
+
+SELECT DISTINCT issues.report_url AS report_url
+FROM checkouts
+INNER JOIN UNNEST(
+    SELECT nodes FROM history.ranges
+    WHERE base = 'abde2345ecf' AND tip = 'b3456cdeg'
+) AS hash ON commit_hash = hash
+INNER JOIN builds ON builds.checkout_id = checkouts.id
+INNER JOIN tests ON tests.build_id = builds.id
+INNER JOIN incidents ON incidents.test_id = tests.id
+INNER JOIN issues ON issues.id = incidents.issue_id
+
+Or, another one: suppose I want to know all issues reproduced by a specific
+test in the last 50 commits from the given one. Let's say I have a table
+called "n_closest":
+
+node    n       closest
+---     -       -----
+node    int     ARRAY[node...]
+
+The positive 'n' would signify "the node and n - 1 commits after the node" and
+the negative 'n' would signify "the node and -n - 1 commits before the node".
+So if n is zero the 'closest' array would contain zero nodes.
+
+And we could only support certain conditions on these tables and otherwise
+return no paths. Such as asking for all the rows, or trying to put conditions
+on the 'closest' in the latter table.
+
+We would also need an "edges" table. Something like:
+
+node    parent
+----    ------
+node    node or NULL
+
+The table could accept inserts, updates and deletes.
+
+
