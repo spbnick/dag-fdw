@@ -15,6 +15,7 @@
 #include "catalog/pg_foreign_table.h"
 #include "utils/lsyscache.h"
 #include "utils/varlena.h"
+#include "utils/builtins.h"
 
 PG_FUNCTION_INFO_V1(dag_fdw_validator);
 PG_FUNCTION_INFO_V1(dag_fdw_handler);
@@ -315,11 +316,9 @@ dag_fdw_handler(PG_FUNCTION_ARGS)
     PG_RETURN_POINTER(fdwroutine);
 }
 
-#if 0
-static uint8_t dat_fdw_data[][2][20] = {
+static const char dag_fdw_data[][2][20] = {
 #include "dag_fdw_sample.inc"
 };
-#endif
 
 /**
  * Get configuration of a server.
@@ -429,6 +428,7 @@ dag_fdw_GetForeignRelSize(PlannerInfo *root,
 {
     struct dag_fdw_table *table = dag_fdw_table_get(foreigntableid);
     baserel->fdw_private = table;
+    baserel->rows = sizeof(dag_fdw_data) / sizeof(*dag_fdw_data);
 }
 
 static void
@@ -478,6 +478,8 @@ dag_fdw_GetForeignPlan(PlannerInfo *root,
 
 typedef struct dag_fdw_scan_state {
     size_t i;
+    text *node;
+    text *parent_node;
 } dag_fdw_scan_state;
 
 static void
@@ -487,6 +489,10 @@ dag_fdw_BeginForeignScan(ForeignScanState *node, int eflags)
     ForeignScan *fs = (ForeignScan *)node->ss.ps.plan;
 #endif
     dag_fdw_scan_state *state = palloc0(sizeof(dag_fdw_scan_state));
+    state->node = palloc(sizeof(**dag_fdw_data) * 2 + VARHDRSZ);
+    SET_VARSIZE(state->node, sizeof(**dag_fdw_data) * 2);
+    state->parent_node = palloc(sizeof(**dag_fdw_data) * 2 + VARHDRSZ);
+    SET_VARSIZE(state->parent_node, sizeof(**dag_fdw_data) * 2);
     node->fdw_state = state;
 }
 
@@ -494,20 +500,22 @@ static TupleTableSlot *
 dag_fdw_IterateForeignScan(ForeignScanState *node)
 {
     TupleTableSlot *slot = node->ss.ss_ScanTupleSlot;
-#if 0
     dag_fdw_scan_state *state = node->fdw_state;
-#endif
 
     ExecClearTuple(slot);
 
-#if 0
-    if (state->i < sizeof(dat_fdw_data) / sizeof(dat_fdw_data[0])) {
+    if (state->i < sizeof(dag_fdw_data) / sizeof(*dag_fdw_data)) {
+        hex_encode(dag_fdw_data[state->i][0], sizeof(**dag_fdw_data),
+                   VARDATA(state->node));
+        hex_encode(dag_fdw_data[state->i][1], sizeof(**dag_fdw_data),
+                   VARDATA(state->parent_node));
         slot->tts_isnull[0] = false;
-        slot->tts_values[0] = Int32GetDatum(state->current);
+        slot->tts_values[0] = PointerGetDatum(state->node);
+        slot->tts_isnull[1] = false;
+        slot->tts_values[1] = PointerGetDatum(state->parent_node);
         ExecStoreVirtualTuple(slot);
-        state->current++;
+        state->i++;
     }
-#endif
 
     return slot;
 }
@@ -522,6 +530,7 @@ dag_fdw_ReScanForeignScan(ForeignScanState *node)
 static void
 dag_fdw_EndForeignScan(ForeignScanState *node)
 {
+    /* Relying on PostgreSQL to destroy our data along with the context */
 }
 
 PG_MODULE_MAGIC;
