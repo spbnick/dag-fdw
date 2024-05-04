@@ -8,14 +8,13 @@
 #include "utils/rel.h"
 #include "access/table.h"
 #include "foreign/foreign.h"
-#include "commands/defrem.h"
-#include "nodes/pg_list.h"
 #include "catalog/pg_foreign_data_wrapper.h"
 #include "catalog/pg_foreign_server.h"
 #include "catalog/pg_foreign_table.h"
 #include "utils/lsyscache.h"
-#include "utils/varlena.h"
 #include "utils/builtins.h"
+#include "dag_fdw_opt.h"
+#include "dag_fdw_rel.h"
 
 PG_FUNCTION_INFO_V1(dag_fdw_validator);
 PG_FUNCTION_INFO_V1(dag_fdw_handler);
@@ -47,28 +46,6 @@ struct dag_fdw_server {
     size_t      node_id_len;
 };
 
-/** The definition of an FDW's relation */
-struct dag_fdw_rel {
-    /** The name of the relation */
-    const char             *name;
-    /**
-     * Oids of attribute (column) types, terminated with InvalidOid.
-     * Used to validate the number and type of columns. Additionally, all
-     * VARCHAR columns are validated to be the size required for node IDs, as
-     * configured for the server.
-     */
-    Oid                     atttypids[8];
-};
-
-/** The relations supported by the FDW (terminated by .name == NULL) */
-static const struct dag_fdw_rel dag_fdw_rels[] = {
-    {
-     .name = "edges",
-     .atttypids = {VARCHAROID, VARCHAROID, InvalidOid},
-    },
-    {.name = NULL}
-};
-
 /** Table configuration */
 struct dag_fdw_table {
     /** The server configuration */
@@ -76,139 +53,6 @@ struct dag_fdw_table {
     /** The relation the table is representing */
     const struct dag_fdw_rel *rel;
 };
-
-/**
- * The prototype for an option value parsing function.
- *
- * @param str   The string to parse the value from.
- * @param pval  The location for the parsed value, the actual type is specific
- *              to the particular function. Can be NULL to discard the output.
- *
- * @return True if the option value parsed successfully, false otherwise.
- */
-typedef bool (*dag_fdw_opt_parse)(const char *str, void *pval);
-
-/** The definition of an FDW's option */
-struct dag_fdw_opt_def {
-    /** The name of the option */
-    const char         *name;
-    /** True if the option is required, false otherwise */
-    bool                required;
-    /** The value parsing function */
-    dag_fdw_opt_parse   parse;
-    /** The location for the parsed value */
-    void               *pvalue;
-};
-
-/** Parse a positive integer option value */
-static bool
-dag_fdw_opt_pos_int_parse(const char *str, void *pval)
-{
-    int num;
-    int end;
-    int *pnum = (int *)pval;
-    if (sscanf(str, "%d%n", &num, &end) == 1 &&
-        str[end] == '\0' && num > 0) {
-        if (pnum != NULL) {
-            *pnum = num;
-        }
-        return true;
-    }
-    return false;
-}
-
-/** Parse a relation name option value */
-static bool
-dag_fdw_opt_rel_name_parse(const char *str, void *pval)
-{
-    const struct dag_fdw_rel *rel;
-    const struct dag_fdw_rel **prel =
-        (const struct dag_fdw_rel **)pval;
-    for (rel = dag_fdw_rels; rel->name != NULL; rel++) {
-        if (strcmp(str, rel->name) == 0) {
-            if (prel != NULL) {
-                *prel = rel;
-            }
-            return true;
-        }
-    }
-    return false;
-}
-
-/**
- * Parse configuration options according to definitions.
- * Report an error, if parsing has failed.
- *
- * @param opt_defs  A pointer to an array of option definitions, terminated
- *                  with a NULL name. Parsed options will be output to
- *                  values referenced by definitions, and "required" flags for
- *                  received options will be set to false.
- * @param opts      The options and values to parse.
- */
-static void
-dag_fdw_opt_defs_parse(struct dag_fdw_opt_def *opt_defs, const List *opts)
-{
-    ListCell   *cell;
-    struct dag_fdw_opt_def *opt_def;
-
-    Assert(opt_defs != NULL);
-
-    if (opt_defs->name == NULL && opts != NIL) {
-        ereport(ERROR,
-                errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
-                errmsg("No options are accepted in this context"));
-    }
-
-    /* For each provided option */
-    foreach(cell, opts) {
-        DefElem                    *def = (DefElem *)lfirst(cell);
-        const char                 *name = def->defname;
-        const char                 *str = defGetString(def);
-        ClosestMatchState           match_state;
-
-        initClosestMatch(&match_state, def->defname, 4);
-
-        /* For each option definition */
-        for (opt_def = opt_defs; opt_def->name; opt_def++) {
-            /* If this is the option definition */
-            if (strcmp(name, opt_def->name) == 0) {
-                /* If parsing is successful */
-                if (opt_def->parse(str, opt_def->pvalue)) {
-                    opt_def->required = false;
-                    break;
-                }
-                ereport(
-                    ERROR,
-                    errcode(ERRCODE_SYNTAX_ERROR),
-                    errmsg("invalid value for option %s: \"%s\"", name, str)
-                );
-            }
-            updateClosestMatch(&match_state, opt_def->name);
-        }
-
-        /* If we haven't found a definition for the option */
-        if (!opt_def->name) {
-            const char *closest_match = getClosestMatch(&match_state);
-            ereport(ERROR,
-                    errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
-                    errmsg("unknown option \"%s\"", def->defname),
-                    closest_match ? errhint(
-                        "Perhaps you meant \"%s\".", closest_match
-                    ) : 0);
-        }
-    }
-
-    /* Check all required options are provided */
-    for (opt_def = opt_defs; opt_def->name; opt_def++) {
-        if (opt_def->required) {
-            ereport(
-                ERROR,
-                errcode(ERRCODE_FDW_OPTION_NAME_NOT_FOUND),
-                errmsg("No value for required option %s", opt_def->name)
-            );
-        }
-    }
-}
 
 /**
  * Parse configuration options for a server.
