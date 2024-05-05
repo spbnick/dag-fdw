@@ -5,14 +5,12 @@
 #include "optimizer/pathnode.h"
 #include "optimizer/restrictinfo.h"
 #include "optimizer/planmain.h"
-#include "utils/rel.h"
-#include "access/table.h"
-#include "foreign/foreign.h"
 #include "catalog/pg_foreign_data_wrapper.h"
 #include "catalog/pg_foreign_server.h"
 #include "catalog/pg_foreign_table.h"
 #include "utils/lsyscache.h"
 #include "utils/builtins.h"
+#include "dag_fdw_table.h"
 #include "dag_fdw_server.h"
 #include "dag_fdw_rel.h"
 #include "dag_fdw_opt.h"
@@ -40,44 +38,6 @@ static void dag_fdw_BeginForeignScan(ForeignScanState *node, int eflags);
 static TupleTableSlot *dag_fdw_IterateForeignScan(ForeignScanState *node);
 static void dag_fdw_ReScanForeignScan(ForeignScanState *node);
 static void dag_fdw_EndForeignScan(ForeignScanState *node);
-
-/** Table configuration */
-struct dag_fdw_table {
-    /** The server configuration */
-    struct dag_fdw_server *server;
-    /** The relation the table is representing */
-    const struct dag_fdw_rel *rel;
-};
-
-/**
- * Parse configuration options for a table.
- *
- * @param ptable    The table to store the parsed options in.
- *                  Can be NULL to discard the options after parsing.
- * @param opts      The table options and values to parse.
- *
- * @return The pointer to the table configuration allocated in the current
- *         memory context.
- */
-static void
-dag_fdw_table_opts_parse(struct dag_fdw_table *ptable, const List *opts)
-{
-    struct dag_fdw_table table;
-    struct dag_fdw_opt_def opt_defs[] = {
-        {.name       = "relation",
-         .required   = true,
-         .parse      = dag_fdw_opt_rel_name_parse,
-         .pvalue     = &table.rel},
-        {.name = NULL}
-    };
-    if (ptable != NULL) {
-        table = *ptable;
-    }
-    dag_fdw_opt_defs_parse(opt_defs, opts);
-    if (ptable != NULL) {
-        *ptable = table;
-    }
-}
 
 /*
  * Validate the generic options given to a FOREIGN DATA WRAPPER, SERVER,
@@ -131,91 +91,6 @@ dag_fdw_handler(PG_FUNCTION_ARGS)
 static const char dag_fdw_data[][2][20] = {
 #include "dag_fdw_sample.inc"
 };
-
-/**
- * Validate a table against a table definition.
- * Report errors on validation failure.
- *
- * @param table     The table definition to validate the table against.
- * @param id        The Oid of the table to validate against the definition.
- */
-static void
-dag_fdw_table_validate(const struct dag_fdw_table *table, Oid id)
-{
-    Relation                rel;
-    TupleDesc               tuple_desc;
-    const Oid              *poid;
-    size_t                  i;
-    Form_pg_attribute       attr;
-
-    Assert(table != NULL);
-    Assert(id != InvalidOid);
-
-    rel = table_open(id, AccessShareLock);
-    tuple_desc = RelationGetDescr(rel);
-
-    /* For each attribute type / tuple's attribute definition pair */
-    for (poid = table->rel->atttypids, i = 0;
-         *poid != InvalidOid && i < tuple_desc->natts;
-         poid++, i++) {
-        attr = TupleDescAttr(tuple_desc, i);
-        if (attr->atttypid != *poid) {
-            ereport(
-                ERROR,
-                errcode(ERRCODE_FDW_ERROR),
-                errmsg("relation \"%s\" (%s): "
-                       "invalid type of column #%zu \"%s\": %u, expecting %u",
-                       RelationGetRelationName(rel),
-                       table->rel->name, i, NameStr(attr->attname),
-                       attr->atttypid, *poid)
-            );
-        }
-        if (*poid == VARCHAROID &&
-            attr->atttypmod !=
-                (int32)table->server->node_id_len * 2 + VARHDRSZ) {
-            ereport(
-                ERROR,
-                errcode(ERRCODE_FDW_ERROR),
-                errmsg("relation \"%s\" (%s): "
-                       "The VARCHAR column #%zu \"%s\" length "
-                       "doesn't match the length of node ID representation",
-                       RelationGetRelationName(rel),
-                       table->rel->name, i, NameStr(attr->attname))
-            );
-        }
-    }
-
-    if (*poid != InvalidOid || i != tuple_desc->natts) {
-        ereport(
-            ERROR,
-            errcode(ERRCODE_FDW_ERROR),
-            errmsg("relation \"%s\" (%s): invalid number of columns",
-                   RelationGetRelationName(rel),
-                   table->rel->name)
-        );
-    }
-
-    table_close(rel, AccessShareLock);
-}
-
-/**
- * Get configuration of a table.
- *
- * @param id    The oid of the foreign table to get configuration of.
- *
- * @return The pointer to the table configuration allocated in the current
- *         memory context.
- */
-static struct dag_fdw_table *
-dag_fdw_table_get(Oid id)
-{
-    struct dag_fdw_table   *table = palloc0(sizeof(*table));
-    ForeignTable           *ft = GetForeignTable(id);
-    table->server = dag_fdw_server_get(ft->serverid);
-    dag_fdw_table_opts_parse(table, ft->options);
-    dag_fdw_table_validate(table, id);
-    return table;
-}
 
 static void
 dag_fdw_GetForeignRelSize(PlannerInfo *root,

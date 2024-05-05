@@ -1,5 +1,5 @@
 MODULE_big = dag_fdw
-OBJS = dag_fdw_rels.o dag_fdw_opt.o dag_fdw_server.o dag_fdw.o
+OBJS = dag_fdw_rels.o dag_fdw_opt.o dag_fdw_table.o dag_fdw_server.o dag_fdw.o
 
 EXTENSION = dag_fdw
 DATA = dag_fdw--1.0.sql
