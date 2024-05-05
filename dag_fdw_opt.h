@@ -7,7 +7,6 @@
 
 #include "postgres.h"
 #include "nodes/pg_list.h"
-#include <stdbool.h>
 
 /**
  * The prototype for an option value parsing function.
