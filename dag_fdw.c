@@ -13,8 +13,9 @@
 #include "catalog/pg_foreign_table.h"
 #include "utils/lsyscache.h"
 #include "utils/builtins.h"
-#include "dag_fdw_opt.h"
+#include "dag_fdw_server.h"
 #include "dag_fdw_rel.h"
+#include "dag_fdw_opt.h"
 
 PG_FUNCTION_INFO_V1(dag_fdw_validator);
 PG_FUNCTION_INFO_V1(dag_fdw_handler);
@@ -40,12 +41,6 @@ static TupleTableSlot *dag_fdw_IterateForeignScan(ForeignScanState *node);
 static void dag_fdw_ReScanForeignScan(ForeignScanState *node);
 static void dag_fdw_EndForeignScan(ForeignScanState *node);
 
-/** Server configuration */
-struct dag_fdw_server {
-    /** The length of node IDs in bytes */
-    size_t      node_id_len;
-};
-
 /** Table configuration */
 struct dag_fdw_table {
     /** The server configuration */
@@ -53,33 +48,6 @@ struct dag_fdw_table {
     /** The relation the table is representing */
     const struct dag_fdw_rel *rel;
 };
-
-/**
- * Parse configuration options for a server.
- *
- * @param pserver   The server to store the parsed options in.
- *                  Can be NULL to discard the options after parsing.
- * @param opts      The server options and values to parse.
- *
- * @return The pointer to the server configuration allocated in the current
- *         memory context.
- */
-static void
-dag_fdw_server_opts_parse(struct dag_fdw_server *pserver, const List *opts)
-{
-    struct dag_fdw_server server = {0,};
-    struct dag_fdw_opt_def opt_defs[] = {
-        {.name       = "node_id_len",
-         .required   = true,
-         .parse      = dag_fdw_opt_pos_int_parse,
-         .pvalue     = &server.node_id_len},
-        {.name = NULL}
-    };
-    dag_fdw_opt_defs_parse(opt_defs, opts);
-    if (pserver != NULL) {
-        *pserver = server;
-    }
-}
 
 /**
  * Parse configuration options for a table.
@@ -163,22 +131,6 @@ dag_fdw_handler(PG_FUNCTION_ARGS)
 static const char dag_fdw_data[][2][20] = {
 #include "dag_fdw_sample.inc"
 };
-
-/**
- * Get configuration of a server.
- *
- * @param id    The oid of the foreign server to get configuration of.
- *
- * @return The pointer to the server configuration allocated in the current
- *         memory context.
- */
-static struct dag_fdw_server *
-dag_fdw_server_get(Oid id)
-{
-    struct dag_fdw_server *server = palloc0(sizeof(*server));
-    dag_fdw_server_opts_parse(server, GetForeignServer(id)->options);
-    return server;
-}
 
 /**
  * Validate a table against a table definition.
