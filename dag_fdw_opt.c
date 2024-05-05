@@ -8,7 +8,6 @@
 #include "utils/varlena.h"
 #include "commands/defrem.h"
 
-/** Parse a positive integer option value */
 bool
 dag_fdw_opt_pos_int_parse(const char *str, void *pval)
 {
@@ -25,7 +24,6 @@ dag_fdw_opt_pos_int_parse(const char *str, void *pval)
     return false;
 }
 
-/** Parse a relation name option value */
 bool
 dag_fdw_opt_rel_name_parse(const char *str, void *pval)
 {
@@ -43,16 +41,6 @@ dag_fdw_opt_rel_name_parse(const char *str, void *pval)
     return false;
 }
 
-/**
- * Parse configuration options according to definitions.
- * Report an error, if parsing has failed.
- *
- * @param opt_defs  A pointer to an array of option definitions, terminated
- *                  with a NULL name. Parsed options will be output to
- *                  values referenced by definitions, and "required" flags for
- *                  received options will be set to false.
- * @param opts      The options and values to parse.
- */
 void
 dag_fdw_opt_defs_parse(struct dag_fdw_opt_def *opt_defs, const List *opts)
 {
